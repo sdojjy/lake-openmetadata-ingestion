@@ -36,11 +36,12 @@ The CLI is installed as `lake-om` (alias: `lake-openmetadata-ingestion`).
 ```bash
 cp config.example.yaml config.yaml          # edit; ${ENV_VAR} placeholders are expanded
 
-# once, by an OM admin: creates bot + policy + role and prints the bot JWT
+# once, by an OM admin: creates bot + policy + role and writes the bot JWT to a 0600 file
 OM_ADMIN_EMAIL=admin@example.com OM_ADMIN_PASSWORD=... lake-om -c config.yaml init-bot
 #   with SSO (no basic-auth login):  OM_ADMIN_TOKEN=<any admin JWT> lake-om init-bot
-#   write to a file instead of stdout: --write-token /path/to/token   (mode 600)
-export OM_JWT_TOKEN=...                     # the bot token
+#   token file: --write-token /path/to/token   (default .state/bot_token, always mode 600)
+#   print to stdout instead (it stays in the job log): --print-token
+export OM_JWT_TOKEN=$(cat .state/bot_token) # or the --write-token path you chose
 
 lake-om -c config.yaml init-service   # create/update the service (idempotent)
 lake-om -c config.yaml metadata       # full sync of catalogs/databases/tables/columns
