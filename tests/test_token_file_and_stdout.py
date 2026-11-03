@@ -9,6 +9,7 @@ documented cron/Airflow deployment means the job log.
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import stat
 
@@ -53,6 +54,17 @@ def test_write_secret_file_does_not_follow_a_symlink(tmp_path):
     assert stat.S_IMODE(link.stat().st_mode) == 0o600
 
 
+def test_write_secret_file_falls_back_without_fchmod(tmp_path, monkeypatch):
+    """os.fchmod is Unix-only: Windows must take the os.chmod(tmp) fallback, not crash."""
+    monkeypatch.delattr(os, "fchmod", raising=False)
+
+    path = write_secret_file(tmp_path / "bot_token", TOKEN)
+
+    assert path.read_text() == TOKEN
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert os.listdir(tmp_path) == ["bot_token"]
+
+
 def test_token_fingerprint_does_not_reveal_the_token():
     fingerprint = token_fingerprint(TOKEN)
     assert fingerprint not in TOKEN
@@ -80,6 +92,12 @@ def init_bot_cfg(monkeypatch):
         ),
     )
     return cfg
+
+
+@pytest.fixture
+def init_bot_cfg_plaintext_http(init_bot_cfg):
+    init_bot_cfg.openmetadata.host = "http://om.example.com/api"
+    return init_bot_cfg
 
 
 def test_init_bot_writes_token_to_file_and_never_prints_it(init_bot_cfg, tmp_path, capsys):
@@ -117,3 +135,44 @@ def test_init_bot_prints_the_token_only_when_explicitly_asked(init_bot_cfg, caps
     out, err = capsys.readouterr()
     assert TOKEN in out
     assert "may persist" in err  # the warning is on stderr, not mixed into stdout
+
+
+def test_init_bot_tolerates_a_namespace_without_the_new_flags(init_bot_cfg, tmp_path, capsys):
+    """Embedders/tests built Namespace(write_token=...) before --print-token existed: must not crash."""
+    target = tmp_path / "bot_token"
+
+    assert cli.cmd_init_bot(init_bot_cfg, argparse.Namespace(write_token=str(target))) == 0
+
+    out, _ = capsys.readouterr()
+    assert target.read_text() == TOKEN
+    assert TOKEN not in out
+
+
+def test_init_bot_tolerates_a_namespace_with_only_print_token(init_bot_cfg, capsys):
+    assert cli.cmd_init_bot(init_bot_cfg, argparse.Namespace(print_token=True)) == 0
+
+    out, err = capsys.readouterr()
+    assert TOKEN in out
+    assert "may persist" in err
+
+
+def test_init_bot_warnings_go_to_stderr_and_stdout_stays_machine_readable(
+    init_bot_cfg_plaintext_http, tmp_path, caplog, capsys
+):
+    """stdout carries only the machine-readable lines; warnings (logging and explicit) go to stderr."""
+    target = tmp_path / "bot_token"
+    args = argparse.Namespace(write_token=str(target), print_token=False)
+
+    with caplog.at_level(logging.WARNING):
+        assert cli.cmd_init_bot(init_bot_cfg_plaintext_http, args) == 0
+
+    out, err = capsys.readouterr()
+    assert out.splitlines() == [
+        "bot=b user_id=1 role=r policy=p",
+        f"token written to {target} (mode 600, sha256:{token_fingerprint(TOKEN)}); "
+        f"export OM_JWT_TOKEN=$(cat {target})",
+    ]
+    assert "warning:" not in out.lower()  # e.g. "warning: the bot JWT ..." must not land on stdout
+    assert "plaintext http" not in out
+    assert "plaintext http" in caplog.text  # library warning -> stderr, never stdout
+    assert err == ""

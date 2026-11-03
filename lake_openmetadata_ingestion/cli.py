@@ -40,7 +40,8 @@ def cmd_init_bot(cfg: Config, args: argparse.Namespace) -> int:
 
     res = bootstrap_bot(om, cfg.bot.name, cfg.bot.token_expiry, cfg.bot.email_domain)
     print(f"bot={res.bot_name} user_id={res.bot_user_id} role={res.role} policy={res.policy}")
-    if args.print_token:
+    # getattr: cmd_init_bot is called directly by embedders/tests with a partial Namespace.
+    if getattr(args, "print_token", False):
         # Explicit opt-in, for tooling that consumes stdout: the token ends up in whatever captures
         # stdout (job log, journald, mail spool), so say so on stderr.
         print("OM_JWT_TOKEN=" + res.token)
@@ -50,7 +51,7 @@ def cmd_init_bot(cfg: Config, args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
     else:
-        path = write_secret_file(args.write_token or DEFAULT_TOKEN_PATH, res.token)
+        path = write_secret_file(getattr(args, "write_token", None) or DEFAULT_TOKEN_PATH, res.token)
         print(
             f"token written to {path} (mode 600, sha256:{token_fingerprint(res.token)}); "
             f"export OM_JWT_TOKEN=$(cat {path})"
@@ -96,7 +97,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = p.add_subparsers(dest="cmd", required=True)
     bot = sub.add_parser(
         "init-bot",
-        help="(admin) create a least-privilege bot + policy + role and print/write its JWT",
+        help="(admin) provision an instance-wide bot + policy + role and write its JWT",
     )
     token_out = bot.add_mutually_exclusive_group()
     token_out.add_argument(

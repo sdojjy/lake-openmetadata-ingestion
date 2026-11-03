@@ -5,6 +5,10 @@
 call follows symlinks. Everything here writes through ``mkstemp`` (created 0600 by ``os.open``) and
 renames into place, so the secret is never observable with looser permissions and a pre-existing
 symlink at the destination is replaced rather than followed.
+
+Windows: ``os.fchmod`` is Unix-only and POSIX permission bits do not really exist there, so the mode
+is best-effort (``os.chmod`` on Windows only toggles the read-only bit); ``mkstemp`` already creates
+the file with the closest equivalent of 0600.
 """
 
 from __future__ import annotations
@@ -23,7 +27,12 @@ def write_secret_file(path: str | Path, data: str, mode: int = DEFAULT_SECRET_MO
 
     fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
     try:
-        os.fchmod(fd, mode)
+        # os.fchmod is Unix-only (it does not exist on Windows). mkstemp already made the file 0600,
+        # so the fallback narrows the temp path with os.chmod *before* anything is written to it.
+        if hasattr(os, "fchmod"):
+            os.fchmod(fd, mode)
+        else:  # pragma: no cover - Windows only
+            os.chmod(tmp_name, mode)
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(data)
             fh.flush()
