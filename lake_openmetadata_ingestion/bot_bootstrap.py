@@ -1,4 +1,4 @@
-"""One-shot creation of a least-privilege OM bot for this tool.
+"""One-shot creation of the OM bot this tool provisions (instance-wide scope, see _RULES caveat).
 
 Creates: policy -> role -> bot user (with the role) -> bot -> JWT. Idempotent (all PUTs); rerunning
 regenerates the token, which invalidates the previous one.

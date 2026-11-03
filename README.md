@@ -23,8 +23,8 @@ FQNs are `service.catalog.database.table`.
 * Python ≥ 3.10; `pip install -e .`
 * A TiDB Cloud Lake cluster with data lineage and history tables enabled, so that
   `system_history.lineage_history` exists.
-* An OpenMetadata bot JWT. `init-bot` (below) creates a least-privilege bot; the built-in
-  `ingestion-bot` token also works but is over-privileged.
+* An OpenMetadata bot JWT. `init-bot` (below) provisions an instance-wide bot + policy + role (see the
+  scope caveat under Usage); the built-in `ingestion-bot` token also works but is over-privileged.
 * The Lake user needs `SELECT` on `system.*` and `system_history.lineage_history`.
 * Lake session timezone must be UTC (the default); the watermark is compared as a naive
   timestamp literal.
@@ -62,6 +62,28 @@ not only the one named by `service.name`. The tool itself only writes under that
 leaked bot token could edit or soft-delete any catalog in the instance. Run this tool against an OM
 instance (or a service-scoped OM tenant) dedicated to the Lake service, and if the instance is
 shared, add a rule condition on the server side.
+
+### Upgrade notes
+
+`init-bot` no longer prints the bot JWT to stdout by default: it writes it to a 0600 file
+(`--write-token PATH`, default `.state/bot_token`, **relative to the process working directory**).
+`--print-token` restores the old stdout output byte for byte (the only addition is a warning on
+stderr), and `--write-token` / `--print-token` are mutually exclusive.
+
+- **Runbooks / CI that parsed stdout**, e.g. `JWT=$(lake-om -c config.yaml init-bot | sed -n 's/^OM_JWT_TOKEN=//p')`,
+  must either add `--print-token` or read the token file: `export OM_JWT_TOKEN=$(cat .state/bot_token)`.
+- **Read-only rootfs / non-writable working directory** (e.g. a K8s initContainer with
+  `workingDir: /`): pass an explicit writable path, e.g. `--write-token /shared/secrets/bot_token`,
+  and mount that path writable. The default is relative to the working directory, not to the
+  `--config` file, so it will not land next to `config.yaml` by accident.
+- **The token path must not be a symlink.** The file is written atomically and replaces the path, so a
+  symlink is replaced by a regular file instead of being written through; point deployments at the
+  real mount target (or at a directory on a shared volume) and use the same UID / `fsGroup` as the
+  process that reads it.
+- **Windows:** the 0600 mode is best-effort — Windows has no POSIX permission bits, so the file relies
+  on the user-profile ACL (`mkstemp` already creates it with the closest equivalent).
+- **Message text:** the success line is now `token written to PATH (mode 600, sha256:...); export ...`.
+  Scripts that matched the old exact text should match the `token written to` prefix.
 
 ## Configuration
 
