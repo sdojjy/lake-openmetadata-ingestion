@@ -56,6 +56,13 @@ The bot's policy allows `Create/ViewAll/EditAll/Delete` on `databaseService`, `d
 `databaseSchema`, `table` only, and denies `EditDisplayName`. Re-running `init-bot` rotates the
 token (the previous one stops working). Token lifetime: `bot.token_expiry` (default 90 days).
 
+**Scope caveat.** OM policy rules match by resource *type*, and the rules this tool installs carry no
+condition, so the bot's grant covers every service, database, schema and table in the OM instance —
+not only the one named by `service.name`. The tool itself only writes under that service, but a
+leaked bot token could edit or soft-delete any catalog in the instance. Run this tool against an OM
+instance (or a service-scoped OM tenant) dedicated to the Lake service, and if the instance is
+shared, add a rule condition on the server side.
+
 ## Configuration
 
 See `config.example.yaml` for every option. The ones that matter operationally:
