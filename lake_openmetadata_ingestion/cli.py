@@ -24,7 +24,8 @@ DEFAULT_TOKEN_PATH = ".state/bot_token"
 def _clients(cfg: Config) -> tuple[LakeClient, OpenMetadataClient]:
     return (
         LakeClient(cfg.lake.dsn, include_stages=cfg.stages.enabled),
-        OpenMetadataClient(cfg.openmetadata.host, cfg.openmetadata.jwt_token, cfg.openmetadata.timeout_seconds),
+        OpenMetadataClient(cfg.openmetadata.host, cfg.openmetadata.jwt_token, cfg.openmetadata.timeout_seconds,
+                           tls_ca_bundle=cfg.openmetadata.tls_ca_bundle, require_tls=cfg.openmetadata.require_tls),
     )
 
 
@@ -35,8 +36,11 @@ def cmd_init_bot(cfg: Config, args: argparse.Namespace) -> int:
     if not admin_token:
         email = os.environ.get("OM_ADMIN_EMAIL") or input("OM admin email: ")
         password = os.environ.get("OM_ADMIN_PASSWORD") or getpass.getpass("OM admin password: ")
-        admin_token = OpenMetadataClient.login_basic(om_cfg.host, email, password, om_cfg.timeout_seconds)
-    om = OpenMetadataClient(om_cfg.host, admin_token, om_cfg.timeout_seconds)
+        admin_token = OpenMetadataClient.login_basic(
+            om_cfg.host, email, password, om_cfg.timeout_seconds,
+            tls_ca_bundle=om_cfg.tls_ca_bundle, require_tls=om_cfg.require_tls)
+    om = OpenMetadataClient(om_cfg.host, admin_token, om_cfg.timeout_seconds,
+                            tls_ca_bundle=om_cfg.tls_ca_bundle, require_tls=om_cfg.require_tls)
 
     res = bootstrap_bot(om, cfg.bot.name, cfg.bot.token_expiry, cfg.bot.email_domain)
     print(f"bot={res.bot_name} user_id={res.bot_user_id} role={res.role} policy={res.policy}")

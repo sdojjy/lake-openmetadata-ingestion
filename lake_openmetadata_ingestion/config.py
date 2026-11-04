@@ -64,6 +64,15 @@ class OpenMetadataConfig:
     host: str
     jwt_token: str
     timeout_seconds: int = 30
+    tls_ca_bundle: str | None = None
+    require_tls: bool = False
+
+    def __post_init__(self):
+        # Environment interpolation produces strings; do not treat the string "false" as true.
+        if isinstance(self.require_tls, str) and self.require_tls.lower() in ("true", "false"):
+            self.require_tls = self.require_tls.lower() == "true"
+        if not isinstance(self.require_tls, bool):
+            raise ValueError("openmetadata.require_tls must be true or false")
 
 
 @dataclass

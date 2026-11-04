@@ -7,6 +7,9 @@ openmetadata:
   host: "http://localhost:8585/api"
   jwt_token: "${OM_JWT_TOKEN}"
   timeout_seconds: 30
+  # Optional production settings; existing local HTTP configurations still work.
+  require_tls: false
+  # tls_ca_bundle: /etc/ssl/certs/openmetadata-ca.pem
 
 service:
   # OM service name; the first part of every FQN. Immutable once created.
