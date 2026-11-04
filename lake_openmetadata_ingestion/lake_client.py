@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import hashlib
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Iterator
@@ -8,6 +9,13 @@ from typing import Any, Iterator
 from tidbcloudlake_driver import BlockingLakeClient
 
 logger = logging.getLogger(__name__)
+
+
+def _log_statement(operation: str, sql: str) -> None:
+    # Statements contain tenant metadata, lineage values and potentially credentials. Keep a
+    # correlation identifier in verbose logs without copying their contents into the job log.
+    payload = sql.encode("utf-8")
+    logger.debug("lake %s: sha256=%s bytes=%d", operation, hashlib.sha256(payload).hexdigest()[:16], len(payload))
 
 
 def _ident(name: str) -> str:
@@ -54,12 +62,12 @@ class LakeClient:
         self.include_stages = include_stages
 
     def query(self, sql: str) -> Iterator[tuple[Any, ...]]:
-        logger.debug("lake sql: %s", sql)
+        _log_statement("query", sql)
         for row in self._conn.query_iter(sql):
             yield row.values()
 
     def exec(self, sql: str) -> None:
-        logger.debug("lake sql: %s", sql)
+        _log_statement("exec", sql)
         self._conn.exec(sql)
 
     def catalogs(self) -> list[str]:

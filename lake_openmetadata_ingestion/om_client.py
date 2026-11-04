@@ -22,8 +22,22 @@ def _warn_on_plaintext_host(host: str) -> None:
     logger.warning(
         "openmetadata.host is plaintext http (%s): the bot JWT and the OM admin password are sent "
         "in the clear; use an https:// endpoint",
-        host,
+        parts._replace(netloc=parts.netloc.rsplit("@", 1)[-1], query="", fragment="").geturl(),
     )
+
+
+def _check_transport(host: str, require_tls: bool) -> None:
+    if require_tls and urlsplit(host).scheme.lower() != "https":
+        raise ValueError("OpenMetadata require_tls requires an https:// endpoint")
+    _warn_on_plaintext_host(host)
+
+
+def _tls_verify(ca_bundle: str | None) -> bool | str:
+    if ca_bundle is None:
+        return True
+    if not isinstance(ca_bundle, str) or not ca_bundle.strip():
+        raise ValueError("tls_ca_bundle must be a non-empty PEM file path")
+    return ca_bundle
 
 
 class OMError(RuntimeError):
@@ -33,11 +47,13 @@ class OMError(RuntimeError):
 
 
 class OpenMetadataClient:
-    def __init__(self, host: str, jwt_token: str, timeout: int = 30):
+    def __init__(self, host: str, jwt_token: str, timeout: int = 30, *,
+                 tls_ca_bundle: str | None = None, require_tls: bool = False):
         self._base = host.rstrip("/")
         self._timeout = timeout
-        _warn_on_plaintext_host(self._base)
+        _check_transport(self._base, require_tls)
         self._s = requests.Session()
+        self._s.verify = _tls_verify(tls_ca_bundle)
         # OM is normally reachable directly; do not let HTTP(S)_PROXY from the shell hijack calls.
         self._s.trust_env = False
         self._s.headers.update(
@@ -77,14 +93,17 @@ class OpenMetadataClient:
     # ---- admin / bot bootstrap ---------------------------------------------------------------
 
     @classmethod
-    def login_basic(cls, host: str, email: str, password: str, timeout: int = 30) -> str:
+    def login_basic(cls, host: str, email: str, password: str, timeout: int = 30, *,
+                    tls_ca_bundle: str | None = None, require_tls: bool = False) -> str:
         """Basic-auth login (OM's built-in auth provider); returns a short-lived access token."""
         import base64
 
+        _check_transport(host, require_tls)
         resp = requests.post(
             f"{host.rstrip('/')}/v1/users/login",
             json={"email": email, "password": base64.b64encode(password.encode()).decode()},
             timeout=timeout,
+            verify=_tls_verify(tls_ca_bundle),
         )
         if resp.status_code >= 400:
             raise OMError(resp.status_code, resp.text[:2000])

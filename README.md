@@ -170,3 +170,17 @@ OM_ADMIN_EMAIL=admin@open-metadata.org OM_ADMIN_PASSWORD=admin \
 export OM_JWT_TOKEN=$(cat ../.state/bot_token)
 lake-om -c ../config.yaml all
 ```
+# Transport and verbose diagnostics
+
+For an HTTPS OpenMetadata endpoint signed by a private CA, set
+`openmetadata.tls_ca_bundle` to the PEM CA bundle path. Set
+`openmetadata.require_tls: true` to reject plaintext endpoints before sending
+the bot JWT or admin login. Both settings apply to `init-bot` and normal bot
+requests. Certificate verification remains enabled, and bot requests continue
+to ignore proxy environment variables. Existing local HTTP configurations work
+until strict transport is enabled.
+
+Verbose Lake logs contain an operation name, statement fingerprint and byte
+count, rather than SQL text and tenant metadata. Statements sent to Lake are
+unchanged. The fingerprint can correlate repeated statements without copying
+their contents into job logs.
