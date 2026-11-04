@@ -1,6 +1,6 @@
 [project]
 name = "lake-openmetadata-ingestion"
-version = "0.1.0"
+version = "0.1.1"
 description = "Sync TiDB Cloud Lake metadata and lineage (system_history.lineage_history) into OpenMetadata via REST"
 readme = "README.md"
 license = {text = "Apache-2.0"}

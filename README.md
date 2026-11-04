@@ -23,8 +23,8 @@ FQNs are `service.catalog.database.table`.
 * Python ≥ 3.10; `pip install -e .`
 * A TiDB Cloud Lake cluster with data lineage and history tables enabled, so that
   `system_history.lineage_history` exists.
-* An OpenMetadata bot JWT. `init-bot` (below) creates a least-privilege bot; the built-in
-  `ingestion-bot` token also works but is over-privileged.
+* An OpenMetadata bot JWT. `init-bot` (below) provisions an instance-wide bot + policy + role (see the
+  scope caveat under Usage); the built-in `ingestion-bot` token also works but is over-privileged.
 * The Lake user needs `SELECT` on `system.*` and `system_history.lineage_history`.
 * Lake session timezone must be UTC (the default); the watermark is compared as a naive
   timestamp literal.
@@ -36,11 +36,12 @@ The CLI is installed as `lake-om` (alias: `lake-openmetadata-ingestion`).
 ```bash
 cp config.example.yaml config.yaml          # edit; ${ENV_VAR} placeholders are expanded
 
-# once, by an OM admin: creates bot + policy + role and prints the bot JWT
+# once, by an OM admin: creates bot + policy + role and writes the bot JWT to a 0600 file
 OM_ADMIN_EMAIL=admin@example.com OM_ADMIN_PASSWORD=... lake-om -c config.yaml init-bot
 #   with SSO (no basic-auth login):  OM_ADMIN_TOKEN=<any admin JWT> lake-om init-bot
-#   write to a file instead of stdout: --write-token /path/to/token   (mode 600)
-export OM_JWT_TOKEN=...                     # the bot token
+#   token file: --write-token /path/to/token   (default .state/bot_token, always mode 600)
+#   print to stdout instead (it stays in the job log): --print-token
+export OM_JWT_TOKEN=$(cat .state/bot_token) # or the --write-token path you chose
 
 lake-om -c config.yaml init-service   # create/update the service (idempotent)
 lake-om -c config.yaml metadata       # full sync of catalogs/databases/tables/columns
@@ -54,6 +55,35 @@ Schedule `metadata` (e.g. hourly) and `lineage` (e.g. every 5–15 min) with cro
 The bot's policy allows `Create/ViewAll/EditAll/Delete` on `databaseService`, `database`,
 `databaseSchema`, `table` only, and denies `EditDisplayName`. Re-running `init-bot` rotates the
 token (the previous one stops working). Token lifetime: `bot.token_expiry` (default 90 days).
+
+**Scope caveat.** OM policy rules match by resource *type*, and the rules this tool installs carry no
+condition, so the bot's grant covers every service, database, schema and table in the OM instance —
+not only the one named by `service.name`. The tool itself only writes under that service, but a
+leaked bot token could edit or soft-delete any catalog in the instance. Run this tool against an OM
+instance (or a service-scoped OM tenant) dedicated to the Lake service, and if the instance is
+shared, add a rule condition on the server side.
+
+### Upgrade notes
+
+`init-bot` no longer prints the bot JWT to stdout by default: it writes it to a 0600 file
+(`--write-token PATH`, default `.state/bot_token`, **relative to the process working directory**).
+`--print-token` restores the old stdout output byte for byte (the only addition is a warning on
+stderr), and `--write-token` / `--print-token` are mutually exclusive.
+
+- **Runbooks / CI that parsed stdout**, e.g. `JWT=$(lake-om -c config.yaml init-bot | sed -n 's/^OM_JWT_TOKEN=//p')`,
+  must either add `--print-token` or read the token file: `export OM_JWT_TOKEN=$(cat .state/bot_token)`.
+- **Read-only rootfs / non-writable working directory** (e.g. a K8s initContainer with
+  `workingDir: /`): pass an explicit writable path, e.g. `--write-token /shared/secrets/bot_token`,
+  and mount that path writable. The default is relative to the working directory, not to the
+  `--config` file, so it will not land next to `config.yaml` by accident.
+- **The token path must not be a symlink.** The file is written atomically and replaces the path, so a
+  symlink is replaced by a regular file instead of being written through; point deployments at the
+  real mount target (or at a directory on a shared volume) and use the same UID / `fsGroup` as the
+  process that reads it.
+- **Windows:** the 0600 mode is best-effort — Windows has no POSIX permission bits, so the file relies
+  on the user-profile ACL (`mkstemp` already creates it with the closest equivalent).
+- **Message text:** the success line is now `token written to PATH (mode 600, sha256:...); export ...`.
+  Scripts that matched the old exact text should match the `token written to` prefix.
 
 ## Configuration
 

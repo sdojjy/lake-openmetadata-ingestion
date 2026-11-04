@@ -2,11 +2,28 @@ from __future__ import annotations
 
 import logging
 from typing import Any, Iterator
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import requests
 
 logger = logging.getLogger(__name__)
+
+_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
+
+def _warn_on_plaintext_host(host: str) -> None:
+    """The bot JWT (and the admin password on init-bot) ride on every request: warn if cleartext."""
+    parts = urlsplit(host)
+    if parts.scheme != "http":
+        return
+    hostname = (parts.hostname or "").lower()
+    if hostname in _LOOPBACK_HOSTS:
+        return
+    logger.warning(
+        "openmetadata.host is plaintext http (%s): the bot JWT and the OM admin password are sent "
+        "in the clear; use an https:// endpoint",
+        host,
+    )
 
 
 class OMError(RuntimeError):
@@ -19,6 +36,7 @@ class OpenMetadataClient:
     def __init__(self, host: str, jwt_token: str, timeout: int = 30):
         self._base = host.rstrip("/")
         self._timeout = timeout
+        _warn_on_plaintext_host(self._base)
         self._s = requests.Session()
         # OM is normally reachable directly; do not let HTTP(S)_PROXY from the shell hijack calls.
         self._s.trust_env = False

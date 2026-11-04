@@ -13,6 +13,12 @@ from .lake_client import LakeClient
 from .lineage_sync import LineageSync
 from .metadata_sync import MetadataSync
 from .om_client import OpenMetadataClient
+from .secure_write import token_fingerprint, write_secret_file
+
+# Where the bot JWT goes when the operator does not pass --write-token. Never stdout by default: on
+# the documented cron/Airflow deployment stdout is the job-log stream, which is retained far longer
+# than the token and readable by anyone with CI/operator access.
+DEFAULT_TOKEN_PATH = ".state/bot_token"
 
 
 def _clients(cfg: Config) -> tuple[LakeClient, OpenMetadataClient]:
@@ -34,14 +40,22 @@ def cmd_init_bot(cfg: Config, args: argparse.Namespace) -> int:
 
     res = bootstrap_bot(om, cfg.bot.name, cfg.bot.token_expiry, cfg.bot.email_domain)
     print(f"bot={res.bot_name} user_id={res.bot_user_id} role={res.role} policy={res.policy}")
-    if args.write_token:
-        path = Path(args.write_token)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(res.token)
-        path.chmod(0o600)
-        print(f"token written to {path} (mode 600); export OM_JWT_TOKEN=$(cat {path})")
-    else:
+    # getattr: cmd_init_bot is called directly by embedders/tests with a partial Namespace.
+    if getattr(args, "print_token", False):
+        # Explicit opt-in, for tooling that consumes stdout: the token ends up in whatever captures
+        # stdout (job log, journald, mail spool), so say so on stderr.
         print("OM_JWT_TOKEN=" + res.token)
+        print(
+            "warning: the bot JWT was printed to stdout and may persist in this job's log; "
+            "prefer --write-token",
+            file=sys.stderr,
+        )
+    else:
+        path = write_secret_file(getattr(args, "write_token", None) or DEFAULT_TOKEN_PATH, res.token)
+        print(
+            f"token written to {path} (mode 600, sha256:{token_fingerprint(res.token)}); "
+            f"export OM_JWT_TOKEN=$(cat {path})"
+        )
     return 0
 
 
@@ -83,9 +97,19 @@ def main(argv: list[str] | None = None) -> int:
     sub = p.add_subparsers(dest="cmd", required=True)
     bot = sub.add_parser(
         "init-bot",
-        help="(admin) create a least-privilege bot + policy + role and print/write its JWT",
+        help="(admin) provision an instance-wide bot + policy + role and write its JWT",
     )
-    bot.add_argument("--write-token", metavar="PATH", help="write the JWT to PATH instead of stdout")
+    token_out = bot.add_mutually_exclusive_group()
+    token_out.add_argument(
+        "--write-token",
+        metavar="PATH",
+        help=f"write the JWT to PATH (mode 600); defaults to {DEFAULT_TOKEN_PATH}",
+    )
+    token_out.add_argument(
+        "--print-token",
+        action="store_true",
+        help="print the JWT to stdout (it will be retained in this job's log)",
+    )
     sub.add_parser("init-service", help="create/update the CustomDatabase service in OM")
     sub.add_parser("metadata", help="full sync of catalogs/databases/tables/columns")
     lin = sub.add_parser("lineage", help="incremental sync of lineage_history (use --full to ignore the watermark)")
